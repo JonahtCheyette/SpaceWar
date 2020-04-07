@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html> 
+ <body>
+    <p align="center"> 
+      <canvas id="mycanvas"></canvas> 
+    </p>
+ </body>
+   <script src="https://cdn.jsdelivr.net/processing.js/1.4.8/processing.min.js"></script> 
+  <script>
+    var sketchProc = function(processingInstance) {
+     with (processingInstance) {
+        size(600, 600); 
+        frameRate(30);
+ /**
+ * 
+ * 
+ * SpaceWar! by jonahcheyette
+ * based off the classic game of the same name.
+ * 
+ * REQUIRES two people
+ * try and get into a stable orbit around the star in the center and shoot the other player.
+ * 
+ * feel free to leave your suggestions in the comments below.
+ * 
+ * 
+ */
+
+//Physics/config variables, screw with these to change the settings of the game
+
+//gravity strength
+var gravStrength = 30;
+
+//mass vars for ship and bullets
+var shipMass = 200;
+var bulletMass = 2;
+
+//sets the lower bound for the ship mass, do not set to 0 or below
+var lowerShipMassBound = 10;
+
+//speed variables for ship and bullets, the bullet variable affects recoil as well
+var bulletSpeed = 4;
+var shipSpeed = 3;
+
+//sets how long the gap between shots are, set to 0 for shot every 30th of a second
+var bulletReloadTimer = 40;
+
+//just for fun, set to false to make it so you can't die
+var canDie = true;
+
+//turns gravity on and off
+var gravOn = true;
+
+{
+//set up
+rectMode(CENTER);
+textAlign(CENTER,CENTER);
+textSize(30);
+noStroke();
+//array of true-false values for key presses
+var keys = [];
+//keeping track of what screen the game is on
+var screen = 0;
+var lastScreen = 0;
+//vars for button logic
+var buttonPress = false;
+//arrays of the explosion particle system and bullets
+var explosions = [];
+var bullets = [];
+//keeping track of what color each player is represented by
+var p1Color = color(255, 0, 0);
+var p2Color = color(0, 0, 255);
+//arrays to keep track of what keys do what (in keyCodes)
+var playerC = [];
+playerC[0] = [87,65,68,69];
+playerC[1] = [38,37,39,16];
+//stuff to record who wins
+var winner = 0;
+var winColor;
+var winTimer = -1;
+var gameOver = false;
+var tied = false;
+
+//particle setup, extremely standard stuff
+var Particle = function(position,max) {
+    this.color = color(random(240,255),random(140,160),0);
+    this.acceleration = new PVector(0, 0);
+    this.velocity = new PVector(0, 0);
+    this.position = position.get();
+    this.timeToLive = 0;
+    this.timeMax = max;
+    this.mass = random(0,1);
+};
+
+Particle.prototype.run = function(s) {
+    this.applyForce(s.calculateGrav(this));
+    this.update();
+    this.display();
+};
+
+Particle.prototype.applyForce = function(force) {
+    var f = PVector.div(force,this.mass);
+    this.acceleration.add(f);
+};
+
+Particle.prototype.update = function() {
+    this.velocity.add(this.acceleration);
+    this.velocity.limit(17);
+    this.position.add(this.velocity);
+    this.acceleration.mult(0);
+    this.timeToLive --;
+};
+
+Particle.prototype.display = function() {
+    fill(this.color, map(this.timeToLive,0,this.timeMax,0,255));
+    ellipse(this.position.x, this.position.y, this.mass, this.mass);
+};
+
+Particle.prototype.isDead = function(){
+    if (this.timeToLive < 0.0) {
+        return true;
+    } else {
+        return false;
+    }
+};
+
+//setting up the exhaust particle stuff
+var tExhaust = function(position,rotation){
+    Particle.call(this,position,40);
+    this.velocity = new PVector(0, 1);
+    this.velocity.rotate(random(rotation-radians(10),rotation+radians(10)));
+    this.timeToLive = 20;
+    this.mass = random(5, 20);
+};
+
+tExhaust.prototype = Object.create(Particle.prototype);
+
+//explosion particle code
+var Debris = function(position){
+    Particle.call(this,position,60);
+    this.velocity = new PVector(random(1,-1), random(1,-1));
+    this.timeToLive = 45;
+    this.mass = random(10,25);
+};
+
+Debris.prototype = Object.create(Particle.prototype);
+
+//explosiion object code
+var Explosion = function() {
+    this.on = false;
+    this.particles = [];
+};
+
+Explosion.prototype.turnOn = function(position){
+    if(!this.on){
+        this.origin = position.get();
+        this.on = true;
+        for(var j = 0; j < 25; j++){
+            this.addParticle();
+        }
+    }
+};
+
+Explosion.prototype.addParticle = function() {
+    this.particles.push(new Debris(this.origin));
+};
+
+Explosion.prototype.run = function(s) {
+  for (var i = this.particles.length-1; i >= 0; i--) {
+      var p = this.particles[i];
+      p.run(s);
+      if (p.isDead()) {
+        this.particles.splice(i, 1);
+      }
+    }
+};
+
+//bullet object code
+var Bullet = function(color,rotation,position,num){
+    this.acceleration = new PVector(0,0);
+    this.velocity = new PVector(bulletSpeed,0);
+    this.position = position.get();
+    this.rotation = rotation - radians(90);
+    this.velocity.rotate(this.rotation);
+    this.mass = bulletMass;
+    this.color = color;
+    this.timeOut = 150;
+    this.num = num;
+};
+
+Bullet.prototype.applyForce = function(force){
+    var f = PVector.div(force,this.mass);
+    this.acceleration.add(f);
+};
+
+Bullet.prototype.screenWrap = function(){
+    if(this.position.x - this.mass/2 < 0){
+        this.position.x = width - this.mass/2;
+    }
+    if(this.position.x + this.mass/2 > width){
+        this.position.x = this.mass/2;
+    }
+    if(this.position.y - this.mass/2 < 0){
+        this.position.y = height - this.mass/2;
+    }
+    if(this.position.y + this.mass/2 >height){
+        this.position.y = this.mass/2;
+    }
+};
+
+Bullet.prototype.starCheck = function(s){
+    if(dist(s.position.x,s.position.y,this.position.x,this.position.y) < 15){
+        this.timeOut = 0;
+    }
+};
+
+Bullet.prototype.display = function(){
+    fill(this.color);
+    pushMatrix();
+    translate(this.position.x,this.position.y);
+    rotate(this.rotation);
+    rect(0,0,7,3);
+    popMatrix();
+};
+
+Bullet.prototype.update = function(){
+    this.timeOut--;
+    this.velocity.add(this.acceleration);
+    this.velocity.limit(25);
+    this.position.add(this.velocity);
+    this.acceleration = new PVector(0,0);
+    this.rotation = this.velocity.heading();
+};
+
+Bullet.prototype.expired = function(){
+    return this.timeOut <= 0;
+};
+
+//spaceship object code
+var Spaceship = function(num,upB,leftB,rightB,shootB){
+    this.acceleration = new PVector(0,0);
+    if(num === 0){
+        this.color = p1Color;
+        this.position = new PVector(width/6,height/6);
+    }else{
+        this.color = p2Color;
+        this.position = new PVector(5*width/6,5*height/6);
+    }
+    this.controlBs = [upB,leftB,rightB,shootB];
+    this.num = num;
+    this.firing = false;
+    this.velocity = new PVector(0,0);
+    this.isDead = false;
+    this.mass = shipMass;
+    this.width = 15;
+    this.height = 30;
+    this.bullets = [];
+    this.exhaust = [];
+    this.corners = [];
+    this.rotation = 0;
+    this.checkRule = false;
+    this.fuel = 300;
+    this.bulletCount = 15;
+    if(num === 0){
+        this.rotation = radians(180);
+    }
+    this.timer = 40;
+};
+
+Spaceship.prototype.applyForce = function(force){
+    var f = PVector.div(force,this.mass);
+    this.acceleration.add(f);
+};
+
+Spaceship.prototype.turnRight = function(){
+    this.rotation+=radians(2);
+};
+
+Spaceship.prototype.turnLeft = function(){
+    this.rotation-=radians(2);
+};
+
+Spaceship.prototype.thrust = function(){
+    if(this.fuel > 0){
+        var thrust = new PVector(shipSpeed,0);
+        thrust.rotate(this.rotation-radians(90));
+        this.applyForce(thrust);
+        this.firing = true;
+    }
+    if(this.fuel <=0){
+        this.firing = false;
+    }
+};
+
+Spaceship.prototype.shoot = function(){
+    if(this.timer < 0 && this.bulletCount > 0){
+        this.bulletPos = new PVector(0,-20);
+        this.bulletPos.rotate(this.rotation);
+        this.bulletPos.add(this.position);
+        bullets.push(new Bullet(this.color,this.rotation,this.bulletPos,this.num));
+        this.timer = bulletReloadTimer;
+    }
+};
+
+//wrap around the screen
+Spaceship.prototype.screenWrap = function(){
+    if(this.position.x < 0){
+        this.position.x = width;
+    }else if(this.position.x > width){
+        this.position.x = 0;
+    }else if(this.position.y < 0){
+        this.position.y = height;
+    }else if(this.position.y > height){
+        this.position.y = 0;
+    }
+};
+
+//check if hit by bullet
+Spaceship.prototype.deathCheck = function(){
+    for(var i = 0; i < bullets.length;i++){
+        if(bullets[i].num !== this.num){
+            var shot = bullets[i].position.get();
+            shot.sub(this.position);
+            shot.rotate(this.rotation);
+            pushMatrix();
+            translate(this.position.x,this.position.y);
+            rotate(this.rotation);
+            fill(255);
+            if((shot.x>= -this.width/2 && shot.x <= this.width/2) && (shot.y >= -this.height/2 && shot.y <= this.height/2)){
+                this.isDead = true;
+            }
+        }
+    popMatrix();
+    }
+};
+
+//check to see if it hit the star
+Spaceship.prototype.stellarDeath = function(s){
+    var star = s.position.get();
+    star.x -= this.position.x;
+    star.y -= this.position.y;
+    star.rotate(-this.rotation);
+    pushMatrix();
+    translate(this.position.x,this.position.y);
+    rotate(this.rotation);
+    fill(255);
+    if((star.x+this.position.x >= this.position.x-this.width/2 && star.x+this.position.x <= this.position.x+this.width/2) && (star.y+this.position.y >= this.position.y-this.height/2 && star.y+this.position.y <= this.position.y+this.height/2)){
+        this.isDead = true;
+    }
+    popMatrix();
+};
+
+//ties all the controls together
+Spaceship.prototype.control = function(){
+    if(keys[this.controlBs[0]]){
+        this.thrust();
+    }else{
+        this.firing = false;
+    }
+    if(keys[this.controlBs[1]]){
+        this.turnLeft();
+    }
+    if(keys[this.controlBs[2]]){
+        this.turnRight();
+    }
+    if(keys[this.controlBs[3]]){
+        this.shoot();
+    }
+    this.mass = constrain(this.mass,lowerShipMassBound,200);
+};
+
+Spaceship.prototype.update = function(star){
+    this.velocity.add(this.acceleration);
+    this.velocity.limit(5);
+    this.position.add(this.velocity);
+    this.acceleration = new PVector(0,0);
+    for(var i = this.bullets.length-1; i >= 0; i--){
+        this.bullets[i].screenWrap();
+        this.bullets[i].update();
+        this.bullets[i].display();
+        if(this.bullets[i].expired()){
+            this.bullets.splice(i,1);
+        }
+    }
+    this.timer--;
+};
+
+Spaceship.prototype.display = function(star){
+    for(var i = this.exhaust.length-1; i >= 0; i--){
+        this.exhaust[i].run(star);
+        if(this.exhaust[i].isDead()){
+            this.exhaust.splice(i,1);
+        }
+    }
+    fill(this.color);
+    pushMatrix();
+    translate(this.position.x,this.position.y);
+    rotate(this.rotation);
+    ellipse(0,2,this.width,5*this.height/6);
+    triangle(0,0,-this.width/2,this.height/2,this.width/2,this.height/2);
+    triangle(0,-this.height/2,-this.width/3,-this.height/5,this.width/3,-this.height/5);
+    fill(0, 0, 0);
+    rect(0,0,this.width/2,this.height/4);
+    if(this.firing){
+        this.givenPos = new PVector(0,15);
+        this.givenPos.rotate(this.rotation);
+        this.givenPos.add(this.position);
+        this.exhaust.push(new tExhaust(this.givenPos,this.rotation));
+    }
+    popMatrix();
+};
+
+//star object code
+var Gmaker = function(){
+    this.expand = false;
+    this.timer = 20;
+    this.position = new PVector(width/2,height/2);
+    this.mass = 20;
+};
+
+Gmaker.prototype.display = function(){
+    if(this.timer <= -1){
+        this.expand = true;
+    }
+    if(this.timer >= 21){
+        this.expand = false;
+    }
+    if(this.expand){
+        this.timer+= 0.8;
+    }else{
+        this.timer-= 0.8;
+    }
+    pushMatrix();
+    translate(this.position.x,this.position.y);
+    fill(255, 255, 255);
+    rect(0,0,this.mass/5,this.timer*2);
+    rect(0,0,this.timer*2,this.mass/6);
+    rotate(45);
+    rect(0,0,this.mass/6,this.timer*2);
+    rotate(90);
+    rect(0,0,this.mass/6,this.timer*2);
+    popMatrix();
+};
+
+Gmaker.prototype.calculateGrav = function(mover){
+    var force = PVector.sub(this.position,mover.position);
+    var distance = force.mag();
+    distance = constrain(distance,0.1,440);
+    force.normalize();
+    var m = (gravStrength*mover.mass*this.mass)/(distance*distance);
+    force.mult(m);
+    return force;
+};
+
+//button code
+var Button = function(x,y,w,h,text,screenTo){
+    this.x = x;
+    this.y = y;
+    this.w = w;
+    this.h = h;
+    this.text = text;
+    this.screenTo = screenTo;
+};
+
+Button.prototype.check = function(){
+    return mouseX >= this.x-this.w/2 && mouseX <= this.x + this.w/2 && mouseY >= this.y - this.h/2 && mouseY <= this.y+this.h/2;
+};
+
+Button.prototype.changeColor = function(){
+    if(this.check()){
+        this.color = color(0, 255, 0);
+        this.tColor = color(0, 0, 0);
+    }else{
+        this.color = color(0, 0, 0);
+        this.tColor = color(0, 255, 0);
+    }
+};
+
+Button.prototype.switchScreens = function(){
+    screen = this.screenTo;
+    buttonPress = false;
+};
+
+Button.prototype.display = function(){
+    fill(this.tColor);
+    rect(this.x,this.y,this.w+10,this.h+10,5);
+    fill(this.color);
+    rect(this.x,this.y,this.w,this.h,5);
+    fill(this.tColor);
+    noStroke();
+    text(this.text,this.x-this.w/2,this.y-3*this.h/5,this.w,this.h);
+};
+
+//all the objects
+var star = new Gmaker();
+
+//buttons on the winning screen
+var wButtons = [new Button(width/2,4.5*height/7,330,80,"Play Again",0)];
+
+//code for the key array
+keyPressed = function(){
+    keys[keyCode] = true;
+};
+
+keyReleased = function(){
+    keys[keyCode] = false;
+};
+
+//buttonpress code
+mouseReleased = function(){
+    buttonPress = true;
+};
+
+//game screen
+var gameScreen = function(shipList){
+    background(0, 0, 0);
+    star.display();
+    if(gameOver){
+        winTimer--;
+    }
+    for(var i = 0; i< explosions.length; i++){
+        if(explosions[i].on){
+            explosions[i].run(star);
+        }
+    }
+    for(var i = bullets.length-1; i>=0;i--){
+        bullets[i].screenWrap();
+        bullets[i].starCheck(star);
+        bullets[i].update();
+        bullets[i].display();
+        if(bullets[i].expired()){
+            bullets.splice(i,1);
+        }
+    }
+    for(var i = shipList.length-1; i >= 0; i--){
+        shipList[i].screenWrap();
+        if(canDie){
+            shipList[i].stellarDeath(star);
+            shipList[i].deathCheck();
+        }
+        if(gravOn){
+            shipList[i].applyForce(star.calculateGrav(shipList[i]));
+        }
+        shipList[i].control();
+        shipList[i].update(star);
+        shipList[i].display(star);
+        if(shipList[i].isDead){
+            explosions[shipList[i].num].turnOn(shipList[i].position);
+            shipList.splice(i,1);
+        }
+    }
+    if(shipList.length < 2 && !gameOver){
+        winTimer = 150;
+        gameOver = true;
+        if(shipList.length === 0){
+            tied = true;
+        }else{
+            winColor = shipList[0].color;
+            winner = shipList[0].num + 1;
+        }
+    }
+    if(winTimer === 0){
+        screen = 1;
+    }
+};
+
+//end screen
+var winScreen = function(shipList){
+    background(0);
+    if(tied){
+        fill(0,255,0);
+        text("It's a tie!",width/2,height/3);
+    }else{
+        fill(winColor);
+        text("Player " + winner + " wins!",width/2,height/3);
+    }
+    for(var i = 0; i < wButtons.length; i++){
+        wButtons[i].changeColor();
+        if(buttonPress && wButtons[i].check()){
+            wButtons[i].switchScreens();
+        }
+        wButtons[i].display();
+    }
+    buttonPress = false;
+};
+
+var ships = [];
+var lastScreen = 0;
+
+draw = function() {
+    //reset the game
+    if(screen === 0 && screen !== lastScreen){
+        ships = [new Spaceship(0,playerC[0][0],playerC[0][1],playerC[0][2],playerC[0][3]),new Spaceship(1,playerC[1][0],playerC[1][1],playerC[1][2],playerC[1][3])];
+        gameOver = false;
+        tied = false;
+        winTimer = -1;
+        explosions = [new Explosion(), new Explosion()];
+        bullets = [];
+    }
+    lastScreen = screen;
+    //dealing with all the different screens
+    if(screen === 0){
+        gameScreen(ships);
+    }else if(screen === 1){
+        winScreen(ships);
+    }
+};
+}
+
+
+}};
+
+    // Get the canvas that Processing-js will use
+    var canvas = document.getElementById("mycanvas"); 
+    var processingInstance = new Processing(canvas, sketchProc); 
+ </script>
+
+</html>
