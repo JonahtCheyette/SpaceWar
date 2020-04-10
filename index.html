@@ -20,7 +20,6 @@
  * REQUIRES two people
  * try and get into a stable orbit around the star in the center and shoot the other player.
  * 
- * feel free to leave your suggestions in the comments below.
  * 
  * 
  */
@@ -30,11 +29,11 @@
 //gravity strength
 var gravStrength = 30;
 
-//mass vars for ship and bullets
+//mass vars for ship and bullets, only affects recoil
 var shipMass = 200;
 var bulletMass = 2;
 
-//sets the lower bound for the ship mass, do not set to 0 or below
+//sets the lower bound for the ship mass, only affects stuff while "Lose mass" rule is on, do not set to 0 or below
 var lowerShipMassBound = 10;
 
 //speed variables for ship and bullets, the bullet variable affects recoil as well
@@ -63,6 +62,8 @@ var screen = 0;
 var lastScreen = 0;
 //vars for button logic
 var buttonPress = false;
+//what additional modifiers are turned on
+var additionalRs = [false,false,false,false,false,false];
 //arrays of the explosion particle system and bullets
 var explosions = [];
 var bullets = [];
@@ -73,6 +74,7 @@ var p2Color = color(0, 0, 255);
 var playerC = [];
 playerC[0] = [87,65,68,69];
 playerC[1] = [38,37,39,16];
+var controls = ["Forward","Left","Right","Shoot"];
 //stuff to record who wins
 var winner = 0;
 var winColor;
@@ -285,6 +287,12 @@ Spaceship.prototype.thrust = function(){
         thrust.rotate(this.rotation-radians(90));
         this.applyForce(thrust);
         this.firing = true;
+        if(additionalRs[2]){
+            this.fuel--;
+        }
+        if(additionalRs[5]){
+            this.mass-= 0.5;
+        }
     }
     if(this.fuel <=0){
         this.firing = false;
@@ -293,11 +301,20 @@ Spaceship.prototype.thrust = function(){
 
 Spaceship.prototype.shoot = function(){
     if(this.timer < 0 && this.bulletCount > 0){
+        if(additionalRs[4]){
+            this.bulletCount--;
+        }
         this.bulletPos = new PVector(0,-20);
         this.bulletPos.rotate(this.rotation);
         this.bulletPos.add(this.position);
         bullets.push(new Bullet(this.color,this.rotation,this.bulletPos,this.num));
         this.timer = bulletReloadTimer;
+        if(additionalRs[3]){
+            this.applyForce(PVector.mult(PVector.mult(bullets[bullets.length-1].velocity,bullets[bullets.length-1].mass),-1));
+        }
+        if(additionalRs[5]){
+            this.mass -= bullets[bullets.length-1].mass;
+        }
     }
 };
 
@@ -317,7 +334,7 @@ Spaceship.prototype.screenWrap = function(){
 //check if hit by bullet
 Spaceship.prototype.deathCheck = function(){
     for(var i = 0; i < bullets.length;i++){
-        if(bullets[i].num !== this.num){
+        if(additionalRs[1] || bullets[i].num !== this.num){
             var shot = bullets[i].position.get();
             shot.sub(this.position);
             shot.rotate(this.rotation);
@@ -374,6 +391,9 @@ Spaceship.prototype.update = function(star){
     this.position.add(this.velocity);
     this.acceleration = new PVector(0,0);
     for(var i = this.bullets.length-1; i >= 0; i--){
+        if(additionalRs[0]){
+            this.bullets[i].applyForce(star.calculateGrav(this.bullets[i]));
+        }
         this.bullets[i].screenWrap();
         this.bullets[i].update();
         this.bullets[i].display();
@@ -451,6 +471,94 @@ Gmaker.prototype.calculateGrav = function(mover){
     return force;
 };
 
+//control changer code
+var TextInput = function(x,y,w,h,player,control,setTo){
+    this.x = x;
+    this.y = y;
+    this.w = w;
+    this.h = h;
+    this.setTo = setTo;
+    this.text = controls[control];
+    this.player = player;
+    this.control = control;
+    this.ready = false;
+    this.keyCodeS = 0;
+    this.keyCheck = false;
+    this.extraFrame = false;
+    if(this.player === 0){
+        this.highlight = color(255, 0, 0);
+    }else{
+        this.highlight = color(0, 0, 255);
+    }
+};
+
+TextInput.prototype.check = function(){
+    if(mousePressed){
+        if(mouseX >= this.x-this.w/2 && mouseX <= this.x + this.w/2 && mouseY >= this.y - this.h/2 && mouseY <= this.y+this.h/2){
+            this.ready = true;
+        }
+        else{
+            this.ready = false;
+        }
+    }
+};
+
+TextInput.prototype.changeColor = function(){
+    if(this.ready){
+        this.color = this.highlight;
+        this.tColor = color(0, 0, 0);
+    }else{
+        this.color = color(0, 0, 0);
+        this.tColor = this.highlight;
+    }
+};
+
+TextInput.prototype.changeInputs = function(shipList){
+    if(keyPressed && this.ready){
+        this.extraTime = true;
+    }
+    this.keyCheck = keyPressed;
+    if(!this.keyCheck && this.extraTime){
+        this.keyCodeS = keyCode;
+        this.extraTime = false;
+        playerC[this.player][this.control] = this.keyCodeS;
+        if(this.keyCodeS === UP){
+            this.setTo = "UP";
+        }else if(this.keyCodeS === LEFT){
+            this.setTo = "LEFT";
+        }else if(this.keyCodeS === DOWN){
+            this.setTo = "DOWN";
+        }else if(this.keyCodeS === RIGHT){
+            this.setTo = "RIGHT";
+        }else if(this.keyCodeS === ALT){
+            this.setTo = "ALT";
+        }else if(this.keyCodeS === CONTROL){
+            this.setTo = "CTRL";
+        }else if(this.keyCodeS === SHIFT){
+            this.setTo = "SHIFT";
+        }else if(this.keyCodeS === BACKSPACE){
+            this.setTo = "DEL";
+        }else if(this.keyCodeS === 157){
+            this.setTo = "FIND";
+        }else if(this.keyCodeS === ENTER){
+            this.setTo = "ENTER";
+        }else if(this.keyCodeS === 32){
+            this.setTo = "SPACE";
+        }else{
+            this.setTo = key.toString();
+        }
+        this.ready = false;
+    }
+};
+
+TextInput.prototype.display = function(){
+    fill(this.color);
+    rect(this.x,this.y,this.w,this.h);
+    fill(this.tColor);
+    noStroke();
+    text(this.text + ": " + this.setTo,this.x-this.w/2,this.y-3*this.h/5,this.w,this.h);
+};
+
 //button code
 var Button = function(x,y,w,h,text,screenTo){
     this.x = x;
@@ -490,11 +598,93 @@ Button.prototype.display = function(){
     text(this.text,this.x-this.w/2,this.y-3*this.h/5,this.w,this.h);
 };
 
+//rule changer code
+var Toggle = function(x,y,w,h,text,name,rule){
+    this.x = x;
+    this.y = y;
+    this.w = w;
+    this.h = h;
+    this.text = text;
+    this.name = name;
+    this.bool = false;
+    this.rule = rule;
+    this.alreadyClicked = false;
+    this.color = color(0, 0, 0);
+    this.tColor = color(0, 255, 0);
+};
+
+Toggle.prototype.check = function(){
+    return mouseX >= this.x+13*this.w/24 && mouseX <= this.x + this.w && mouseY >= this.y - this.h/2 && mouseY <= this.y+this.h && mousePressed;
+};
+
+Toggle.prototype.checkOver = function(){
+    return mouseX >= this.x && mouseX <= this.x + 15*this.w/14 && mouseY >= this.y && mouseY <= this.y+this.h;
+};
+
+Toggle.prototype.handleBool = function(){
+    if(!this.check()){
+        this.alreadyClicked = false;
+    }
+    if(this.check() && !this.alreadyClicked){
+        if(!this.bool){
+            this.bool = true;
+        }else if(this.bool){
+            this.bool = false;
+        }
+        this.alreadyClicked = true;
+    }
+    if(this.bool){
+        this.state = "On";
+        this.color = color(0, 0, 0);
+        this.tColor = color(0, 255, 0);
+    }else{
+        this.state = "Off";
+        this.color = color(0, 255, 0);
+        this.tColor = color(0, 0, 0);
+    }
+    additionalRs[this.rule] = this.bool;
+};
+
+Toggle.prototype.display = function(){
+    rectMode(CORNER);
+    fill(0,255,0);
+    if(this.checkOver()){
+        text(this.text,0,20,width,height/8);
+    }
+    rect(this.x-5,this.y-5,this.w/2+10,this.h+10,5);
+    fill(this.color);
+    rect(this.x+this.w/2+10,this.y-5,this.w/2+10,this.h+10,5);
+    fill(0);
+    rect(this.x,this.y,this.w/2,this.h,5);
+    fill(this.tColor);
+    rect(this.x+this.w/2+15,this.y,this.w/2,this.h,5);
+    fill(0,255,0);
+    noStroke();
+    text(this.name,this.x,this.y-this.h/2-6,this.w/2,2*this.h);
+    fill(this.color);
+    text(this.state,this.x+2.2*this.w/7,this.y+2-this.h/7,this.w,this.h);
+    rectMode(CENTER);
+};
+
 //all the objects
 var star = new Gmaker();
 
+//startup screen butons
+var sButtons = [new Button(width/2,height/3,220,80,"Play",4),new Button(width/2,height/2,220,80,"Controls",1),new Button(width/2,2*height/3,220,80,"How To Play",3), new Button(width/2,5*height/6,220,80,"Optional Rules",2)];
+
+//control screen buttons and inputs
+var cButtons = [new Button(width/2,6*height/7,330,80,"Back",0)];
+var cInputs = [new TextInput(13*width/48,200,230,50,0,0,"w"),new TextInput(163*width/600,250,230,50,0,1,"a"),new TextInput(163*width/600,300,230,50,0,2,"d"),new TextInput(163*width/600,350,230,50,0,3,"e"),new TextInput(37*width/48,200,230,50,1,0,"UP"),new TextInput(463*width/600,250,230,50,1,1,"LEFT"),new TextInput(463*width/600,300,230,50,1,2,"RIGHT"),new TextInput(463*width/600,350,230,50,1,3,"SHIFT")];
+
+//how to play screen button
+var gButtons = [new Button(width/2,6*height/7,330,80,"Back",0)];
+
+//optional rules buttons and toggles
+var aButtons = [new Button(width/2,6*height/7,330,80,"Back",0)];
+var aToggles = [new Toggle(width/11,height/5,210,80,"Makes it so that gravity affects the bullets","Curved Bullets",0),new Toggle(6*width/11,height/5,210,80,"Makes it so that you can shoot yourself","Frendly Fire",1),new Toggle(width/11,height/2.5,210,80,"Limits the amount of fuel you have","Fuel limit",2),new Toggle(6*width/11,height/2.5,210,80,"Gives recoil to your bullets","Recoil",3),new Toggle(width/11,height/1.7,210,80,"Gives you limited shots","Limited bullets",4),new Toggle(6*width/11,height/1.7,210,80,"You lose mass as you shoot and move","Lose Mass",5)];
+
 //buttons on the winning screen
-var wButtons = [new Button(width/2,4.5*height/7,330,80,"Play Again",0)];
+var wButtons = [new Button(width/2,6*height/7,330,80,"Main Menu",0),new Button(width/2,4.5*height/7,330,80,"Play Again",4)];
 
 //code for the key array
 keyPressed = function(){
@@ -510,6 +700,84 @@ mouseReleased = function(){
     buttonPress = true;
 };
 
+//starting screen
+var startScreen = function(){
+    background(0);
+    fill(0, 255, 0);
+    textSize(50);
+    text("Spacewar!",width/2-250,height/6-250,500,500);
+    textSize(30);
+    for(var i = 0; i < sButtons.length; i++){
+        sButtons[i].changeColor();
+        if(buttonPress && sButtons[i].check()){
+            sButtons[i].switchScreens();
+        }
+        sButtons[i].display();
+    }
+    buttonPress = false;
+};
+
+//controls screen
+var controlScreen = function(shipList){
+    background(0);
+    fill(255, 0, 0);
+    text("Player 1",width/5,height/5);
+    fill(0, 0, 255);
+    text("Player 2",7*width/10,height/5);
+    fill(0, 255, 0);
+    rect(width/2,2*height/5,10,height/2);
+    for(var i = 0; i < cButtons.length; i++){
+        cButtons[i].changeColor();
+        if(buttonPress && cButtons[i].check()){
+            cButtons[i].switchScreens();
+        }
+        cButtons[i].display();
+    }
+    buttonPress = false;
+    textAlign(LEFT,CENTER);
+    for(var i = 0; i < cInputs.length; i++){
+        cInputs[i].check();
+        cInputs[i].changeColor();
+        cInputs[i].changeInputs(shipList);
+        cInputs[i].display();
+    }
+    textAlign(CENTER,CENTER);
+};
+
+//how to play screen
+var guideScreen = function(){
+    background(0);
+    fill(0, 255, 0);
+    textSize(30);
+    text("This game is based off the classic game by the same name. So if you know how to play that, feel free to stop reading. If you've never heard of the game, then the way it works is this: You are in a spaceship near a star, and another spaceship is moving in on your turf. The goal is to destroy the other ship by shooting it or causing it to fall into the star while not letting him do the same to you. Touch the star, you die. get shot, you die.",20,-height/12,width-30,height);
+    textSize(30);
+    for(var i = 0; i < gButtons.length; i++){
+        gButtons[i].changeColor();
+        if(buttonPress && gButtons[i].check()){
+            gButtons[i].switchScreens();
+        }
+        gButtons[i].display();
+    }
+    buttonPress = false;
+};
+
+//optional rules screen
+var addRulesScreen = function(){
+    background(0);
+    for(var i = 0; i < gButtons.length; i++){
+        gButtons[i].changeColor();
+        if(buttonPress && gButtons[i].check()){
+            gButtons[i].switchScreens();
+        }
+        gButtons[i].display();
+    }
+    buttonPress = false;
+    for(var i = 0; i < aToggles.length; i++){
+        aToggles[i].handleBool();
+        aToggles[i].display();
+    }
+};
+
 //game screen
 var gameScreen = function(shipList){
     background(0, 0, 0);
@@ -523,6 +791,9 @@ var gameScreen = function(shipList){
         }
     }
     for(var i = bullets.length-1; i>=0;i--){
+        if(additionalRs[0]){
+            bullets[i].applyForce(star.calculateGrav(bullets[i]));
+        }
         bullets[i].screenWrap();
         bullets[i].starCheck(star);
         bullets[i].update();
@@ -559,7 +830,7 @@ var gameScreen = function(shipList){
         }
     }
     if(winTimer === 0){
-        screen = 1;
+        screen = 5;
     }
 };
 
@@ -584,11 +855,11 @@ var winScreen = function(shipList){
 };
 
 var ships = [];
-var lastScreen = 1;
+var lastScreen = 0;
 
 draw = function() {
     //reset the game
-    if(screen === 0 && screen !== lastScreen){
+    if(screen === 4 && screen !== lastScreen){
         ships = [new Spaceship(0,playerC[0][0],playerC[0][1],playerC[0][2],playerC[0][3]),new Spaceship(1,playerC[1][0],playerC[1][1],playerC[1][2],playerC[1][3])];
         gameOver = false;
         tied = false;
@@ -599,8 +870,16 @@ draw = function() {
     lastScreen = screen;
     //dealing with all the different screens
     if(screen === 0){
-        gameScreen(ships);
+        startScreen();
     }else if(screen === 1){
+        controlScreen(ships);
+    }else if(screen === 3){
+        guideScreen();
+    }else if(screen === 2){
+        addRulesScreen();
+    }else if(screen === 4){
+        gameScreen(ships);
+    }else if(screen === 5){
         winScreen(ships);
     }
 };
